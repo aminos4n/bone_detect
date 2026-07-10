@@ -108,6 +108,7 @@ const state = {
   detectorLoading: null,
   welcomeEndsAt: 0,
   audioUnlocking: null,
+  welcomePlayback: Promise.resolve(),
 };
 
 const overlayContext = overlayCanvas.getContext("2d");
@@ -604,6 +605,64 @@ function playAudio(name, options = {}) {
   });
 }
 
+async function playAudioAndWait(name, fallbackMs, options = {}) {
+  if (!state.audioArmed || !audioBank[name]) {
+    return false;
+  }
+
+  const { exclusive = true } = options;
+
+  if (exclusive) {
+    Object.entries(audioBank).forEach(([key, audio]) => {
+      if (key !== name) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+    });
+  }
+
+  const audio = audioBank[name];
+  audio.pause();
+  audio.currentTime = 0;
+
+  try {
+    await audio.play();
+  } catch (error) {
+    console.warn("audio playback blocked", error);
+    return false;
+  }
+
+  await new Promise((resolve) => {
+    let settled = false;
+    const timeoutMs = getAudioDurationMs(name, fallbackMs) + 400;
+
+    const cleanup = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      window.clearTimeout(timeoutId);
+      audio.removeEventListener("ended", handleDone);
+      audio.removeEventListener("error", handleDone);
+      resolve();
+    };
+
+    const handleDone = () => {
+      cleanup();
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+    }, timeoutMs);
+
+    audio.addEventListener("ended", handleDone, { once: true });
+    audio.addEventListener("error", handleDone, { once: true });
+  });
+
+  return true;
+}
+
 async function unlockAudioPlayback() {
   if (state.audioUnlocking) {
     return state.audioUnlocking;
@@ -634,33 +693,17 @@ async function unlockAudioPlayback() {
 
 async function runSoundTest() {
   state.audioArmed = true;
-  playAudio("welcome");
-  await wait(getAudioDurationMs("welcome", WELCOME_AUDIO_MS));
-  playAudio("invite");
-  await wait(getAudioDurationMs("invite", INVITE_AUDIO_MS));
-  playAudio("janken");
-  await wait(getAudioDurationMs("janken", ROUND_PROMPT_MS));
-  playAudio("draw");
-  await wait(getAudioDurationMs("draw", DRAW_AUDIO_MS));
-  playAudio("lose");
-  await wait(getAudioDurationMs("lose", LOSE_AUDIO_MS));
-  playAudio("win");
+  await playAudioAndWait("welcome", WELCOME_AUDIO_MS);
+  await playAudioAndWait("invite", INVITE_AUDIO_MS);
+  await playAudioAndWait("janken", ROUND_PROMPT_MS);
+  await playAudioAndWait("draw", DRAW_AUDIO_MS);
+  await playAudioAndWait("lose", LOSE_AUDIO_MS);
+  await playAudioAndWait("win", WIN_AUDIO_MS);
 }
 
 function pickCpuHand(playerHand) {
-  const playerWinsHand = Object.keys(winMap).find((hand) => winMap[hand] === playerHand);
-  const cpuLosesHand = winMap[playerHand];
-  const roll = Math.random();
-
-  if (roll < 0.3) {
-    return cpuLosesHand;
-  }
-
-  if (roll < 0.5) {
-    return playerHand;
-  }
-
-  return playerWinsHand;
+  const allHands = Object.keys(hands);
+  return allHands[Math.floor(Math.random() * allHands.length)];
 }
 
 function judgeRound(playerHand, cpuHand) {
@@ -704,18 +747,14 @@ async function primeRound(options = {}) {
   roundMessage.textContent = "さいしょは ぐー を きいてね!";
 
   if (withInvite) {
-    const remainingWelcomeMs = Math.max(0, state.welcomeEndsAt - Date.now());
-    if (remainingWelcomeMs > 0) {
-      await wait(remainingWelcomeMs);
-    }
+    await state.welcomePlayback;
 
     if (state.scene !== "play") {
       return;
     }
 
     speechBubble.textContent = "いっしょに あそぼう!";
-    playAudio("invite");
-    await wait(getAudioDurationMs("invite", INVITE_AUDIO_MS));
+    await playAudioAndWait("invite", INVITE_AUDIO_MS);
   }
 
   if (state.scene !== "play") {
@@ -725,8 +764,7 @@ async function primeRound(options = {}) {
   speechBubble.textContent = "さいしょは ぐー";
   roundStatus.textContent = "まっててね";
   roundMessage.textContent = "さいしょは ぐー の あとで おしてね!";
-  playAudio("janken");
-  await wait(getAudioDurationMs("janken", ROUND_PROMPT_MS));
+  await playAudioAndWait("janken", ROUND_PROMPT_MS);
 
   if (state.scene !== "play") {
     return;
@@ -781,6 +819,7 @@ function resetExperience(keepCamera = true) {
   state.gameBusy = false;
   state.debugMode = "off";
   state.welcomeEndsAt = 0;
+  state.welcomePlayback = Promise.resolve();
 
   setScene("idle");
   resetScore();
@@ -819,7 +858,7 @@ function applyDetectionPayload(payload) {
       state.hasPresence = true;
       setScene("detected");
       state.welcomeEndsAt = Date.now() + getAudioDurationMs("welcome", WELCOME_AUDIO_MS);
-      playAudio("welcome");
+      state.welcomePlayback = playAudioAndWait("welcome", WELCOME_AUDIO_MS);
       enterPlayScene();
     } else if (state.hasPresence && state.consecutiveDetectedFrames >= REQUIRED_FRAMES) {
       enterPlayScene();
@@ -917,7 +956,7 @@ startButton.addEventListener("click", () => {
 
 cameraPlaceholder.addEventListener("click", () => {
   void unlockAudioPlayback();
-  if (IS_DISPLAY_VIEW && !state.cameraReady && !state.cameraStarting) {
+  if (!state.cameraReady && !state.cameraStarting) {
     startCamera();
   }
 });
@@ -960,10 +999,7 @@ setGameBusy(false);
 showDetectorHint(getIdleHint());
 
 if (IS_DISPLAY_VIEW) {
-  setCameraPlaceholder("カメラを じゅんびしています", "カメラの きょかを まっているよ");
-  window.setTimeout(() => {
-    startCamera();
-  }, 120);
+  setCameraPlaceholder("がめんをタップして はじめるよ", "カメラと おとを じゅんびするよ");
 }
 
 window.setInterval(requestDetections, SAMPLE_INTERVAL_MS);
