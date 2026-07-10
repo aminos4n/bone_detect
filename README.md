@@ -46,10 +46,9 @@ python3 -m http.server 8000
 この版は Python サーバーや YOLO バックエンドなしで配信できます。  
 `HTTPS` で静的ファイルを置けるサービスなら動きます。
 
-おすすめはこの2つです。
 
 - GitHub Pages
-- Cloudflare Pages
+
 
 ## メモ
 
