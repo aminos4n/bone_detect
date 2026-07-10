@@ -6,9 +6,10 @@ import {
 const DETECTOR_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_uint8.tflite";
 const DETECTOR_WASM_ROOT = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
-const REQUIRED_FRAMES = 10;
+const WELCOME_FRAMES = 10;
+const PLAY_READY_FRAMES = 30;
 const SAMPLE_INTERVAL_MS = 150;
-const RESET_AFTER_MS = 4000;
+const RESET_MISSING_FRAMES = 14;
 const OUTCOME_EFFECT_MS = 5000;
 const ROUND_PROMPT_MS = 2800;
 const WELCOME_AUDIO_MS = 2400;
@@ -93,6 +94,7 @@ Object.values(audioBank).forEach((audio) => {
 
 const state = {
   scene: "idle",
+  flowId: 0,
   cameraReady: false,
   detectorOnline: false,
   requestInFlight: false,
@@ -101,7 +103,7 @@ const state = {
   gameBusy: false,
   hasPresence: false,
   consecutiveDetectedFrames: 0,
-  lastPersonSeenAt: 0,
+  consecutiveMissingFrames: 0,
   debugMode: "off",
   stream: null,
   detector: null,
@@ -171,13 +173,20 @@ function getIdleHint() {
   return IS_EDIT_VIEW ? "ブラウザ内AIで ひとを みつけるよ" : "カメラに うつると はじまるよ";
 }
 
+function isFlowActive(flowId) {
+  return flowId === state.flowId;
+}
+
+function setSpeech(text) {
+  speechBubble.textContent = text;
+}
+
 function setScene(scene) {
   state.scene = scene;
   app.dataset.scene = scene;
 
   const content = sceneContent[scene];
   sceneLabel.textContent = content.label;
-  speechBubble.textContent = content.speech;
   mainHeading.textContent = content.heading;
   subHeading.textContent = content.subheading;
   videoBanner.textContent = content.banner;
@@ -199,7 +208,7 @@ function resetScore() {
 }
 
 function updateMeters() {
-  frameValue.textContent = `${state.consecutiveDetectedFrames} / ${REQUIRED_FRAMES}`;
+  frameValue.textContent = `${Math.min(state.consecutiveDetectedFrames, PLAY_READY_FRAMES)} / ${PLAY_READY_FRAMES}`;
   personStatus.textContent = state.hasPresence ? "みつけたよ" : "まだ みつけてないよ";
   detectorStatus.textContent = state.detectorOnline ? "うごいてる" : "じゅんび中";
 }
@@ -581,6 +590,13 @@ function stopCamera() {
   cameraPlaceholder.hidden = false;
 }
 
+function stopAllAudio() {
+  Object.values(audioBank).forEach((audio) => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
+}
+
 function playAudio(name, options = {}) {
   if (!state.audioArmed || !audioBank[name]) {
     return;
@@ -736,9 +752,9 @@ function updateScore(result) {
 }
 
 async function primeRound(options = {}) {
-  const { withInvite = false } = options;
+  const { withInvite = false, flowId = state.flowId } = options;
 
-  if (state.scene !== "play") {
+  if (state.scene !== "play" || !isFlowActive(flowId)) {
     return;
   }
 
@@ -749,28 +765,27 @@ async function primeRound(options = {}) {
   if (withInvite) {
     await state.welcomePlayback;
 
-    if (state.scene !== "play") {
+    if (state.scene !== "play" || !isFlowActive(flowId)) {
       return;
     }
 
-    speechBubble.textContent = "いっしょに あそぼう!";
+    setSpeech("じゃんけんで いっしょに あそぼう!");
     await playAudioAndWait("invite", INVITE_AUDIO_MS);
   }
 
-  if (state.scene !== "play") {
+  if (state.scene !== "play" || !isFlowActive(flowId)) {
     return;
   }
 
-  speechBubble.textContent = "さいしょは ぐー";
+  setSpeech("さいしょは ぐー");
   roundStatus.textContent = "まっててね";
   roundMessage.textContent = "さいしょは ぐー の あとで おしてね!";
   await playAudioAndWait("janken", ROUND_PROMPT_MS);
 
-  if (state.scene !== "play") {
+  if (state.scene !== "play" || !isFlowActive(flowId)) {
     return;
   }
 
-  speechBubble.textContent = "いま ボタンを おしてね!";
   roundStatus.textContent = "えらべるよ";
   roundMessage.textContent = "いま ぐー ちょき ぱー を おしてね!";
   setGameBusy(false);
@@ -781,47 +796,60 @@ async function playRound(playerHand) {
     return;
   }
 
+  const flowId = state.flowId;
   setGameBusy(true);
   roundStatus.textContent = "しょうぶ中";
   roundMessage.textContent = `きみは ${hands[playerHand].name} を えらんだよ!`;
-  speechBubble.textContent = "ぽん!";
   await wait(320);
+
+  if (!isFlowActive(flowId) || state.scene !== "play") {
+    return;
+  }
 
   const cpuHand = pickCpuHand(playerHand);
   const result = judgeRound(playerHand, cpuHand);
 
-  speechBubble.textContent = `${hands[cpuHand].name} を だしたよ!`;
   roundMessage.textContent = `${speechText[result]} きみ: ${hands[playerHand].name} / あいて: ${hands[cpuHand].name}`;
   roundStatus.textContent = outcomeText[result];
   updateScore(result);
 
   if (result === "win") {
     launchWinEffect();
+    setSpeech(speechText.win);
     playAudio("win");
     await wait(Math.max(OUTCOME_EFFECT_MS, getAudioDurationMs("win", WIN_AUDIO_MS)));
   } else if (result === "lose") {
     launchLoseEffect();
+    setSpeech(speechText.lose);
     playAudio("lose");
     await wait(Math.max(OUTCOME_EFFECT_MS, getAudioDurationMs("lose", LOSE_AUDIO_MS)));
   } else {
+    setSpeech(speechText.draw);
     playAudio("draw");
     await wait(getAudioDurationMs("draw", DRAW_AUDIO_MS));
   }
 
-  await primeRound();
+  if (!isFlowActive(flowId) || state.scene !== "play") {
+    return;
+  }
+
+  await primeRound({ flowId });
 }
 
 function resetExperience(keepCamera = true) {
+  state.flowId += 1;
   state.hasPresence = false;
   state.consecutiveDetectedFrames = 0;
-  state.lastPersonSeenAt = 0;
+  state.consecutiveMissingFrames = 0;
   state.requestInFlight = false;
   state.gameBusy = false;
   state.debugMode = "off";
   state.welcomeEndsAt = 0;
   state.welcomePlayback = Promise.resolve();
+  stopAllAudio();
 
   setScene("idle");
+  setSpeech(sceneContent.idle.speech);
   resetScore();
   updateMeters();
   roundMessage.textContent = "ひとを みつけると あそびが はじまるよ!";
@@ -840,10 +868,11 @@ function enterPlayScene() {
     return;
   }
 
+  const flowId = state.flowId;
   state.audioArmed = true;
   setScene("play");
   roundMessage.textContent = "さいしょは ぐー を きいてね!";
-  primeRound({ withInvite: true });
+  primeRound({ withInvite: true, flowId });
 }
 
 function applyDetectionPayload(payload) {
@@ -851,22 +880,25 @@ function applyDetectionPayload(payload) {
   state.detectorOnline = true;
 
   if (detections.length > 0) {
-    state.lastPersonSeenAt = Date.now();
+    state.consecutiveMissingFrames = 0;
     state.consecutiveDetectedFrames += 1;
 
-    if (!state.hasPresence && state.consecutiveDetectedFrames >= REQUIRED_FRAMES) {
+    if (!state.hasPresence && state.consecutiveDetectedFrames >= WELCOME_FRAMES) {
       state.hasPresence = true;
       setScene("detected");
+      setSpeech(sceneContent.detected.speech);
       state.welcomeEndsAt = Date.now() + getAudioDurationMs("welcome", WELCOME_AUDIO_MS);
       state.welcomePlayback = playAudioAndWait("welcome", WELCOME_AUDIO_MS);
-      enterPlayScene();
-    } else if (state.hasPresence && state.consecutiveDetectedFrames >= REQUIRED_FRAMES) {
+    }
+
+    if (state.hasPresence && state.consecutiveDetectedFrames >= PLAY_READY_FRAMES) {
       enterPlayScene();
     }
   } else {
     state.consecutiveDetectedFrames = 0;
+    state.consecutiveMissingFrames += 1;
 
-    if (state.hasPresence && Date.now() - state.lastPersonSeenAt > RESET_AFTER_MS) {
+    if (state.hasPresence && state.consecutiveMissingFrames >= RESET_MISSING_FRAMES) {
       resetExperience(true);
     }
   }
@@ -993,6 +1025,7 @@ window.addEventListener(
 );
 
 setScene("idle");
+setSpeech(sceneContent.idle.speech);
 updateCounters();
 updateMeters();
 setGameBusy(false);
