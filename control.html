@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>じゃんけん リモコン</title>
+    <link rel="stylesheet" href="control.css" />
+  </head>
+  <body class="control-page">
+    <main class="control-shell">
+      <header class="control-header">
+        <p class="control-badge">ブラウザだけ版</p>
+        <h1>メイン画面を ひらくよ</h1>
+        <p class="control-lead">PCなし版では このURLではなく メインURLを そのまま使います</p>
+      </header>
+
+      <section class="control-note" aria-label="案内">
+        <p>カメラも じゃんけんボタンも ひとつのページに まとまりました。</p>
+        <a class="control-home-link" href="./">メイン画面を ひらく</a>
+      </section>
+
+      <footer class="control-credit">VOICEBOX: ずんだもん</footer>
+    </main>
+
+    <script>
+      window.setTimeout(() => {
+        window.location.replace("./");
+      }, 1400);
+    </script>
+  </body>
+</html>

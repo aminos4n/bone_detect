@@ -1,0 +1,125 @@
+:root {
+  color-scheme: light;
+  --ink: #334066;
+  --pink: #ff78ae;
+  --blue: #3260bc;
+  --mint: #7dd7b4;
+  --sun: #ffd65a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+  color: var(--ink);
+  background: linear-gradient(180deg, #f4fbff 0%, #eef8ff 42%, #fff7d8 100%);
+}
+
+button {
+  font: inherit;
+}
+
+.control-page {
+  min-height: 100vh;
+  padding: 16px;
+  display: grid;
+  place-items: center;
+}
+
+.control-shell {
+  width: min(860px, 100%);
+  display: grid;
+  gap: 18px;
+}
+
+.control-header,
+.control-note {
+  background: rgba(255, 255, 255, 0.86);
+  border: 3px solid rgba(73, 66, 112, 0.1);
+  border-radius: 28px;
+  box-shadow: 0 20px 36px rgba(73, 66, 112, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.control-header {
+  padding: 22px 20px;
+  text-align: center;
+}
+
+.control-badge,
+.control-lead,
+.control-credit {
+  margin: 0;
+}
+
+.control-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid rgba(255, 120, 174, 0.2);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.control-badge::before,
+.control-badge::after {
+  content: "★";
+  color: var(--sun);
+}
+
+.control-header h1 {
+  margin: 14px 0 10px;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.05;
+}
+
+.control-lead {
+  font-size: 1.06rem;
+  font-weight: 700;
+  color: #6c6391;
+}
+
+.control-note {
+  padding: 28px 24px;
+  display: grid;
+  gap: 14px;
+  text-align: center;
+}
+
+.control-note p {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: #6c6391;
+}
+
+.control-home-link {
+  justify-self: center;
+  min-width: min(100%, 340px);
+  padding: 18px 24px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #5d7cff 0%, #7166ff 100%);
+  color: #fff;
+  text-decoration: none;
+  font-size: 1.12rem;
+  font-weight: 900;
+  box-shadow: 0 18px 30px rgba(29, 32, 47, 0.2);
+}
+
+.control-credit {
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #6f6790;
+}
