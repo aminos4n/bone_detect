@@ -813,17 +813,15 @@ function applyDetectionPayload(payload) {
 
   if (detections.length > 0) {
     state.lastPersonSeenAt = Date.now();
+    state.consecutiveDetectedFrames += 1;
 
-    if (!state.hasPresence) {
+    if (!state.hasPresence && state.consecutiveDetectedFrames >= REQUIRED_FRAMES) {
       state.hasPresence = true;
       setScene("detected");
       state.welcomeEndsAt = Date.now() + getAudioDurationMs("welcome", WELCOME_AUDIO_MS);
       playAudio("welcome");
-    }
-
-    state.consecutiveDetectedFrames += 1;
-
-    if (state.consecutiveDetectedFrames >= REQUIRED_FRAMES) {
+      enterPlayScene();
+    } else if (state.hasPresence && state.consecutiveDetectedFrames >= REQUIRED_FRAMES) {
       enterPlayScene();
     }
   } else {
