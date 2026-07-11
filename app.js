@@ -58,6 +58,9 @@ const sceneLabel = document.getElementById("sceneLabel");
 const personStatus = document.getElementById("personStatus");
 const detectorStatus = document.getElementById("detectorStatus");
 const speechBubble = document.getElementById("speechBubble");
+const avatarHandDisplay = document.getElementById("avatarHandDisplay");
+const avatarHandEmoji = document.getElementById("avatarHandEmoji");
+const avatarHandName = document.getElementById("avatarHandName");
 const mainHeading = document.getElementById("mainHeading");
 const subHeading = document.getElementById("subHeading");
 const videoBanner = document.getElementById("videoBanner");
@@ -195,6 +198,28 @@ function isFlowActive(flowId) {
 
 function setSpeech(text) {
   speechBubble.textContent = text;
+}
+
+function showAvatarHand(hand) {
+  if (!avatarHandDisplay || !avatarHandEmoji || !avatarHandName || !hands[hand]) {
+    return;
+  }
+
+  avatarHandDisplay.hidden = false;
+  avatarHandDisplay.dataset.hand = hand;
+  avatarHandEmoji.textContent = hands[hand].icon;
+  avatarHandName.textContent = hands[hand].name;
+  avatarHandDisplay.classList.add("is-visible");
+}
+
+function hideAvatarHand() {
+  if (!avatarHandDisplay) {
+    return;
+  }
+
+  avatarHandDisplay.classList.remove("is-visible");
+  avatarHandDisplay.hidden = true;
+  delete avatarHandDisplay.dataset.hand;
 }
 
 function setGestureArmed(armed) {
@@ -907,6 +932,7 @@ async function primeRound(options = {}) {
 
   setGameBusy(true);
   setGestureArmed(false);
+  hideAvatarHand();
   roundStatus.textContent = "じゅんび中";
   roundMessage.textContent = "さいしょは ぐー を きいてね!";
 
@@ -960,6 +986,7 @@ async function playRound(playerHand) {
   const cpuHand = pickCpuHand(playerHand);
   const result = judgeRound(playerHand, cpuHand);
 
+  showAvatarHand(cpuHand);
   roundMessage.textContent = `${speechText[result]} きみ: ${hands[playerHand].name} / あいて: ${hands[cpuHand].name}`;
   roundStatus.textContent = outcomeText[result];
   updateScore(result);
@@ -1001,6 +1028,7 @@ function resetExperience(keepCamera = true) {
   stopAllAudio();
 
   setScene("idle");
+  hideAvatarHand();
   setSpeech(sceneContent.idle.speech);
   resetScore();
   updateMeters();

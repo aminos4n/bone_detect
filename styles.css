@@ -202,6 +202,58 @@ button {
   transition: transform 0.3s ease;
 }
 
+.avatar-hand-display {
+  position: absolute;
+  right: 18px;
+  top: 108px;
+  z-index: 2;
+  min-width: 132px;
+  padding: 12px 14px;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid rgba(51, 64, 102, 0.1);
+  box-shadow: 0 16px 26px rgba(73, 66, 112, 0.16);
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.avatar-hand-display.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.avatar-hand-display[data-hand="rock"] {
+  background: rgba(255, 214, 160, 0.97);
+}
+
+.avatar-hand-display[data-hand="scissors"] {
+  background: rgba(255, 193, 216, 0.97);
+}
+
+.avatar-hand-display[data-hand="paper"] {
+  background: rgba(202, 244, 223, 0.97);
+}
+
+.avatar-hand-label {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #6f6790;
+}
+
+.avatar-hand-emoji {
+  font-size: clamp(2.2rem, 3.6vw, 3.6rem);
+  line-height: 1;
+}
+
+.avatar-hand-name {
+  font-size: clamp(1rem, 1.8vw, 1.28rem);
+  font-weight: 900;
+}
+
 .invite-chip {
   position: absolute;
   right: 16px;
@@ -689,6 +741,11 @@ body[data-view="display"] .camera-zone {
   grid-template-rows: minmax(0, 1fr);
 }
 
+body[data-view="display"] .avatar-hand-display {
+  top: 116px;
+  right: 20px;
+}
+
 body[data-view="display"] .play-overlay {
   display: grid;
   left: 18px;
@@ -1052,6 +1109,13 @@ body[data-view="display"] .app[data-scene="play"] .gesture-panel {
     right: 10px;
     top: 10px;
     min-height: 58px;
+  }
+
+  .avatar-hand-display {
+    top: 88px;
+    right: 10px;
+    min-width: 112px;
+    padding: 10px 12px;
   }
 
   .video-banner,
