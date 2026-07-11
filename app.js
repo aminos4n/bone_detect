@@ -1,13 +1,17 @@
 import {
   FilesetResolver,
+  GestureRecognizer,
   ObjectDetector,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
 
 const DETECTOR_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_uint8.tflite";
+const GESTURE_MODEL_URL =
+  "https://storage.googleapis.com/mediapipe-tasks/gesture_recognizer/gesture_recognizer.task";
 const DETECTOR_WASM_ROOT = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
 const WELCOME_FRAMES = 10;
 const PLAY_READY_FRAMES = 30;
+const GESTURE_CONFIRM_FRAMES = 4;
 const SAMPLE_INTERVAL_MS = 150;
 const RESET_MISSING_FRAMES = 14;
 const OUTCOME_EFFECT_MS = 5000;
@@ -43,6 +47,12 @@ const winMap = {
   paper: "rock",
 };
 
+const gestureToHand = {
+  Closed_Fist: "rock",
+  Victory: "scissors",
+  Open_Palm: "paper",
+};
+
 const app = document.getElementById("app");
 const sceneLabel = document.getElementById("sceneLabel");
 const personStatus = document.getElementById("personStatus");
@@ -62,7 +72,6 @@ const detectorHint = document.getElementById("detectorHint");
 const startButton = document.getElementById("startButton");
 const soundTestButton = document.getElementById("soundTestButton");
 const resetButton = document.getElementById("resetButton");
-const handButtons = [...document.querySelectorAll(".hand-button")];
 const debugButtons = [...document.querySelectorAll(".debug-button")];
 
 const counters = {
@@ -108,9 +117,16 @@ const state = {
   stream: null,
   detector: null,
   detectorLoading: null,
+  gestureRecognizer: null,
+  gestureLoading: null,
+  vision: null,
+  visionLoading: null,
   welcomeEndsAt: 0,
   audioUnlocking: null,
   welcomePlayback: Promise.resolve(),
+  gestureArmed: false,
+  pendingGestureHand: null,
+  pendingGestureFrames: 0,
 };
 
 const overlayContext = overlayCanvas.getContext("2d");
@@ -134,8 +150,8 @@ const sceneContent = {
     label: "あそび",
     speech: "いっしょに あそぼう! じゃんけん しよう!",
     heading: "じゃんけん スタート!",
-    subheading: "さいしょは ぐー の あとで おしてね",
-    banner: "じゃんけん するよ!",
+    subheading: "さいしょは ぐー の あとで てを みせてね",
+    banner: "てを みせて じゃんけん するよ!",
   },
 };
 
@@ -170,7 +186,7 @@ function showDetectorHint(message) {
 }
 
 function getIdleHint() {
-  return IS_EDIT_VIEW ? "ブラウザ内AIで ひとを みつけるよ" : "カメラに うつると はじまるよ";
+  return IS_EDIT_VIEW ? "ブラウザ内AIで ひとと てを みるよ" : "カメラに うつって てを みせてね";
 }
 
 function isFlowActive(flowId) {
@@ -179,6 +195,12 @@ function isFlowActive(flowId) {
 
 function setSpeech(text) {
   speechBubble.textContent = text;
+}
+
+function setGestureArmed(armed) {
+  state.gestureArmed = armed;
+  state.pendingGestureHand = null;
+  state.pendingGestureFrames = 0;
 }
 
 function setScene(scene) {
@@ -211,6 +233,11 @@ function updateMeters() {
   frameValue.textContent = `${Math.min(state.consecutiveDetectedFrames, PLAY_READY_FRAMES)} / ${PLAY_READY_FRAMES}`;
   personStatus.textContent = state.hasPresence ? "みつけたよ" : "まだ みつけてないよ";
   detectorStatus.textContent = state.detectorOnline ? "うごいてる" : "じゅんび中";
+}
+
+function refreshAiStatus() {
+  state.detectorOnline = Boolean(state.detector && state.gestureRecognizer);
+  updateMeters();
 }
 
 function clearBoxes() {
@@ -453,6 +480,27 @@ async function preferSelfFacingCamera(stream) {
   return replacement;
 }
 
+async function getVisionResolver() {
+  if (state.vision) {
+    return state.vision;
+  }
+
+  if (state.visionLoading) {
+    return state.visionLoading;
+  }
+
+  state.visionLoading = FilesetResolver.forVisionTasks(DETECTOR_WASM_ROOT)
+    .then((vision) => {
+      state.vision = vision;
+      return vision;
+    })
+    .finally(() => {
+      state.visionLoading = null;
+    });
+
+  return state.visionLoading;
+}
+
 async function initBrowserDetector() {
   if (state.detector) {
     return state.detector;
@@ -463,8 +511,8 @@ async function initBrowserDetector() {
   }
 
   state.detectorLoading = (async () => {
-    showDetectorHint("AIを よみこんでいるよ");
-    const vision = await FilesetResolver.forVisionTasks(DETECTOR_WASM_ROOT);
+    showDetectorHint("ひとのAIを よみこんでいるよ");
+    const vision = await getVisionResolver();
     const detector = await ObjectDetector.createFromOptions(vision, {
       baseOptions: {
         modelAssetPath: DETECTOR_MODEL_URL,
@@ -476,14 +524,12 @@ async function initBrowserDetector() {
     });
 
     state.detector = detector;
-    state.detectorOnline = true;
-    updateMeters();
-    showDetectorHint("AIじゅんび OK");
+    refreshAiStatus();
+    showDetectorHint("ひとのAI じゅんび OK");
     return detector;
   })().catch((error) => {
-    state.detectorOnline = false;
-    updateMeters();
-    showDetectorHint("AIの よみこみに しっぱいしたよ");
+    refreshAiStatus();
+    showDetectorHint("ひとのAI よみこみに しっぱいしたよ");
     console.error(error);
     throw error;
   }).finally(() => {
@@ -491,6 +537,50 @@ async function initBrowserDetector() {
   });
 
   return state.detectorLoading;
+}
+
+async function initGestureRecognizer() {
+  if (state.gestureRecognizer) {
+    return state.gestureRecognizer;
+  }
+
+  if (state.gestureLoading) {
+    return state.gestureLoading;
+  }
+
+  state.gestureLoading = (async () => {
+    showDetectorHint("てのAIを よみこんでいるよ");
+    const vision = await getVisionResolver();
+    const recognizer = await GestureRecognizer.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: GESTURE_MODEL_URL,
+      },
+      runningMode: "VIDEO",
+      numHands: 1,
+      minHandDetectionConfidence: 0.45,
+      minHandPresenceConfidence: 0.45,
+      minTrackingConfidence: 0.45,
+      cannedGesturesClassifierOptions: {
+        categoryAllowlist: Object.keys(gestureToHand),
+        scoreThreshold: 0.45,
+        maxResults: 1,
+      },
+    });
+
+    state.gestureRecognizer = recognizer;
+    refreshAiStatus();
+    showDetectorHint("てのAI じゅんび OK");
+    return recognizer;
+  })().catch((error) => {
+    refreshAiStatus();
+    showDetectorHint("てのAI よみこみに しっぱいしたよ");
+    console.error(error);
+    throw error;
+  }).finally(() => {
+    state.gestureLoading = null;
+  });
+
+  return state.gestureLoading;
 }
 
 function buildDetectionsFromResult(result) {
@@ -520,6 +610,65 @@ function buildDetectionsFromResult(result) {
       };
     })
     .filter(Boolean);
+}
+
+function extractGestureCandidate(result) {
+  const gestureGroups = Array.isArray(result?.gestures) ? result.gestures : [];
+  let bestCandidate = null;
+
+  gestureGroups.forEach((categories, index) => {
+    const topCategory = Array.isArray(categories)
+      ? categories.find((category) => gestureToHand[category.categoryName])
+      : null;
+
+    if (!topCategory) {
+      return;
+    }
+
+    const candidate = {
+      hand: gestureToHand[topCategory.categoryName],
+      gestureName: topCategory.categoryName,
+      score: Number(topCategory.score || 0),
+      landmarks: Array.isArray(result?.landmarks?.[index]) ? result.landmarks[index] : [],
+    };
+
+    if (!bestCandidate || candidate.score > bestCandidate.score) {
+      bestCandidate = candidate;
+    }
+  });
+
+  return bestCandidate;
+}
+
+function updateGestureCandidate(candidate) {
+  if (!state.gestureArmed || state.scene !== "play" || state.gameBusy) {
+    setGestureArmed(false);
+    return;
+  }
+
+  if (!candidate) {
+    state.pendingGestureHand = null;
+    state.pendingGestureFrames = 0;
+    roundMessage.textContent = "てを カメラに みせてね!";
+    return;
+  }
+
+  if (state.pendingGestureHand === candidate.hand) {
+    state.pendingGestureFrames += 1;
+  } else {
+    state.pendingGestureHand = candidate.hand;
+    state.pendingGestureFrames = 1;
+  }
+
+  if (state.pendingGestureFrames >= GESTURE_CONFIRM_FRAMES) {
+    const confirmedHand = state.pendingGestureHand;
+    roundMessage.textContent = `${hands[confirmedHand].name} に きまったよ!`;
+    setGestureArmed(false);
+    void playRound(confirmedHand);
+    return;
+  }
+
+  roundMessage.textContent = `${hands[candidate.hand].name} を よんでるよ ${state.pendingGestureFrames}/${GESTURE_CONFIRM_FRAMES}`;
 }
 
 async function startCamera() {
@@ -555,13 +704,14 @@ async function startCamera() {
     cameraVideo.srcObject = nextStream;
     await cameraVideo.play();
     await initBrowserDetector();
+    await initGestureRecognizer();
 
     state.cameraReady = true;
     state.audioArmed = true;
     cameraPlaceholder.hidden = true;
     setCameraPlaceholder("カメラを じゅんび しています", "カメラの きょかを まっているよ");
-    roundMessage.textContent = "ひとを みつけると あそびモードに なるよ!";
-    showDetectorHint("じぶんむき カメラで じゅんび OK");
+    roundMessage.textContent = "ひとを みつけて てを みせると あそべるよ!";
+    showDetectorHint("ひとと てのAIで じゅんび OK");
   } catch (error) {
     const message = getCameraErrorMessage(error);
     nextStream?.getTracks?.().forEach((track) => track.stop());
@@ -732,9 +882,6 @@ function judgeRound(playerHand, cpuHand) {
 
 function setGameBusy(busy) {
   state.gameBusy = busy;
-  handButtons.forEach((button) => {
-    button.disabled = busy || state.scene !== "play";
-  });
 }
 
 function updateScore(result) {
@@ -759,6 +906,7 @@ async function primeRound(options = {}) {
   }
 
   setGameBusy(true);
+  setGestureArmed(false);
   roundStatus.textContent = "じゅんび中";
   roundMessage.textContent = "さいしょは ぐー を きいてね!";
 
@@ -779,15 +927,17 @@ async function primeRound(options = {}) {
 
   setSpeech("さいしょは ぐー");
   roundStatus.textContent = "まっててね";
-  roundMessage.textContent = "さいしょは ぐー の あとで おしてね!";
+  roundMessage.textContent = "さいしょは ぐー の あとで てを みせてね!";
   await playAudioAndWait("janken", ROUND_PROMPT_MS);
 
   if (state.scene !== "play" || !isFlowActive(flowId)) {
     return;
   }
 
-  roundStatus.textContent = "えらべるよ";
-  roundMessage.textContent = "いま ぐー ちょき ぱー を おしてね!";
+  roundStatus.textContent = "てを よんでるよ";
+  roundMessage.textContent = "いま てを カメラに みせてね!";
+  setSpeech("いま てを みせてね!");
+  setGestureArmed(true);
   setGameBusy(false);
 }
 
@@ -798,8 +948,9 @@ async function playRound(playerHand) {
 
   const flowId = state.flowId;
   setGameBusy(true);
+  setGestureArmed(false);
   roundStatus.textContent = "しょうぶ中";
-  roundMessage.textContent = `きみは ${hands[playerHand].name} を えらんだよ!`;
+  roundMessage.textContent = `きみは ${hands[playerHand].name} を だしたよ!`;
   await wait(320);
 
   if (!isFlowActive(flowId) || state.scene !== "play") {
@@ -846,6 +997,7 @@ function resetExperience(keepCamera = true) {
   state.debugMode = "off";
   state.welcomeEndsAt = 0;
   state.welcomePlayback = Promise.resolve();
+  setGestureArmed(false);
   stopAllAudio();
 
   setScene("idle");
@@ -870,6 +1022,7 @@ function enterPlayScene() {
 
   const flowId = state.flowId;
   state.audioArmed = true;
+  setGestureArmed(false);
   setScene("play");
   roundMessage.textContent = "さいしょは ぐー を きいてね!";
   primeRound({ withInvite: true, flowId });
@@ -959,12 +1112,29 @@ async function requestDetections() {
     }
   }
 
+  if (!state.gestureRecognizer) {
+    try {
+      await initGestureRecognizer();
+    } catch {
+      return;
+    }
+  }
+
   state.requestInFlight = true;
 
   try {
-    const result = state.detector.detectForVideo(cameraVideo, performance.now());
+    const now = performance.now();
+    const result = state.detector.detectForVideo(cameraVideo, now);
     const detections = buildDetectionsFromResult(result);
     applyDetectionPayload({ detections });
+
+    if ((state.scene === "play" && state.gestureArmed) || IS_EDIT_VIEW) {
+      const gestureResult = state.gestureRecognizer?.recognizeForVideo(cameraVideo, now);
+      const gestureCandidate = extractGestureCandidate(gestureResult);
+      updateGestureCandidate(gestureCandidate);
+    } else {
+      setGestureArmed(false);
+    }
   } catch (error) {
     state.detectorOnline = false;
     updateMeters();
@@ -974,12 +1144,6 @@ async function requestDetections() {
     state.requestInFlight = false;
   }
 }
-
-handButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    playRound(button.dataset.hand);
-  });
-});
 
 startButton.addEventListener("click", () => {
   void unlockAudioPlayback();
