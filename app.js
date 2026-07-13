@@ -296,9 +296,13 @@ function setupOverlayCanvas() {
   return rect;
 }
 
+function mirrorPointX(point, rect) {
+  return (1 - point.x) * rect.width;
+}
+
 function drawPersonBoxes(detections, rect) {
   detections.forEach((detection, index) => {
-    const x = detection.bbox.x * rect.width;
+    const x = (1 - detection.bbox.x - detection.bbox.width) * rect.width;
     const y = detection.bbox.y * rect.height;
     const width = detection.bbox.width * rect.width;
     const height = detection.bbox.height * rect.height;
@@ -343,13 +347,13 @@ function drawHandSkeleton(candidate, rect) {
     }
 
     overlayContext.beginPath();
-    overlayContext.moveTo(from.x * rect.width, from.y * rect.height);
-    overlayContext.lineTo(to.x * rect.width, to.y * rect.height);
+    overlayContext.moveTo(mirrorPointX(from, rect), from.y * rect.height);
+    overlayContext.lineTo(mirrorPointX(to, rect), to.y * rect.height);
     overlayContext.stroke();
   });
 
   landmarks.forEach((point, index) => {
-    const x = point.x * rect.width;
+    const x = mirrorPointX(point, rect);
     const y = point.y * rect.height;
     overlayContext.beginPath();
     overlayContext.arc(x, y, index === 0 ? pointRadius + 1.5 : pointRadius, 0, Math.PI * 2);
@@ -367,7 +371,7 @@ function drawHandSkeleton(candidate, rect) {
     const boxWidth = textWidth + 24;
     const boxHeight = 30;
     const anchor = landmarks[0];
-    const boxX = Math.max(12, Math.min(rect.width - boxWidth - 12, anchor.x * rect.width - boxWidth / 2));
+    const boxX = Math.max(12, Math.min(rect.width - boxWidth - 12, mirrorPointX(anchor, rect) - boxWidth / 2));
     const boxY = Math.max(14, anchor.y * rect.height - 42);
     overlayContext.beginPath();
     overlayContext.roundRect(boxX, boxY, boxWidth, boxHeight, 14);
