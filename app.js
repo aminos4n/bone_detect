@@ -53,6 +53,22 @@ const gestureToHand = {
   Open_Palm: "paper",
 };
 
+const handColors = {
+  rock: "#ffb55a",
+  scissors: "#ff78ae",
+  paper: "#7dd7b4",
+  default: "#9ed7ff",
+};
+
+const HAND_CONNECTIONS = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20],
+  [0, 17],
+];
+
 const app = document.getElementById("app");
 const sceneLabel = document.getElementById("sceneLabel");
 const personStatus = document.getElementById("personStatus");
@@ -130,6 +146,7 @@ const state = {
   gestureArmed: false,
   pendingGestureHand: null,
   pendingGestureFrames: 0,
+  currentGestureCandidate: null,
 };
 
 const overlayContext = overlayCanvas.getContext("2d");
@@ -269,19 +286,17 @@ function clearBoxes() {
   overlayContext.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 }
 
-function drawBoxes(detections) {
-  if (!IS_EDIT_VIEW) {
-    clearBoxes();
-    return;
-  }
-
+function setupOverlayCanvas() {
   const rect = overlayCanvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   overlayCanvas.width = Math.round(rect.width * dpr);
   overlayCanvas.height = Math.round(rect.height * dpr);
   overlayContext.setTransform(dpr, 0, 0, dpr, 0, 0);
   overlayContext.clearRect(0, 0, rect.width, rect.height);
+  return rect;
+}
 
+function drawPersonBoxes(detections, rect) {
   detections.forEach((detection, index) => {
     const x = detection.bbox.x * rect.width;
     const y = detection.bbox.y * rect.height;
@@ -297,6 +312,91 @@ function drawBoxes(detections) {
     overlayContext.fillStyle = "#24417e";
     overlayContext.fillText("ひと 検知", x + 14, y + 25);
   });
+}
+
+function drawHandSkeleton(candidate, rect) {
+  const landmarks = Array.isArray(candidate?.landmarks) ? candidate.landmarks : [];
+
+  if (landmarks.length < 2) {
+    return;
+  }
+
+  const color = handColors[candidate.hand] || handColors.default;
+  const pointRadius = IS_EDIT_VIEW ? 4.5 : 5.5;
+  const lineWidth = IS_EDIT_VIEW ? 3.5 : 4.5;
+
+  overlayContext.save();
+  overlayContext.strokeStyle = color;
+  overlayContext.fillStyle = color;
+  overlayContext.lineWidth = lineWidth;
+  overlayContext.lineCap = "round";
+  overlayContext.lineJoin = "round";
+  overlayContext.shadowColor = `${color}99`;
+  overlayContext.shadowBlur = IS_EDIT_VIEW ? 12 : 18;
+
+  HAND_CONNECTIONS.forEach(([fromIndex, toIndex]) => {
+    const from = landmarks[fromIndex];
+    const to = landmarks[toIndex];
+
+    if (!from || !to) {
+      return;
+    }
+
+    overlayContext.beginPath();
+    overlayContext.moveTo(from.x * rect.width, from.y * rect.height);
+    overlayContext.lineTo(to.x * rect.width, to.y * rect.height);
+    overlayContext.stroke();
+  });
+
+  landmarks.forEach((point, index) => {
+    const x = point.x * rect.width;
+    const y = point.y * rect.height;
+    overlayContext.beginPath();
+    overlayContext.arc(x, y, index === 0 ? pointRadius + 1.5 : pointRadius, 0, Math.PI * 2);
+    overlayContext.fill();
+  });
+
+  if (candidate.hand && hands[candidate.hand]) {
+    overlayContext.shadowBlur = 0;
+    overlayContext.fillStyle = "rgba(255, 255, 255, 0.94)";
+    overlayContext.strokeStyle = color;
+    overlayContext.lineWidth = 2;
+    overlayContext.font = '800 18px "Hiragino Sans", sans-serif';
+    const label = `て: ${hands[candidate.hand].name}`;
+    const textWidth = overlayContext.measureText(label).width;
+    const boxWidth = textWidth + 24;
+    const boxHeight = 30;
+    const anchor = landmarks[0];
+    const boxX = Math.max(12, Math.min(rect.width - boxWidth - 12, anchor.x * rect.width - boxWidth / 2));
+    const boxY = Math.max(14, anchor.y * rect.height - 42);
+    overlayContext.beginPath();
+    overlayContext.roundRect(boxX, boxY, boxWidth, boxHeight, 14);
+    overlayContext.fill();
+    overlayContext.stroke();
+    overlayContext.fillStyle = "#24417e";
+    overlayContext.fillText(label, boxX + 12, boxY + 21);
+  }
+
+  overlayContext.restore();
+}
+
+function drawBoxes(detections, candidate = null) {
+  const shouldDrawHand = Boolean(candidate?.landmarks?.length) && (state.hasPresence || state.scene === "play" || IS_EDIT_VIEW);
+
+  if (!IS_EDIT_VIEW && !shouldDrawHand) {
+    clearBoxes();
+    return;
+  }
+
+  const rect = setupOverlayCanvas();
+
+  if (IS_EDIT_VIEW) {
+    drawPersonBoxes(detections, rect);
+  }
+
+  if (shouldDrawHand) {
+    drawHandSkeleton(candidate, rect);
+  }
 }
 
 function addEffectMessage(text, modifierClass) {
@@ -666,8 +766,11 @@ function extractGestureCandidate(result) {
 }
 
 function updateGestureCandidate(candidate) {
+  state.currentGestureCandidate = candidate;
+
   if (!state.gestureArmed || state.scene !== "play" || state.gameBusy) {
-    setGestureArmed(false);
+    state.pendingGestureHand = null;
+    state.pendingGestureFrames = 0;
     return;
   }
 
@@ -1024,6 +1127,7 @@ function resetExperience(keepCamera = true) {
   state.debugMode = "off";
   state.welcomeEndsAt = 0;
   state.welcomePlayback = Promise.resolve();
+  state.currentGestureCandidate = null;
   setGestureArmed(false);
   stopAllAudio();
 
@@ -1085,7 +1189,7 @@ function applyDetectionPayload(payload) {
   }
 
   updateMeters();
-  drawBoxes(detections);
+  drawBoxes(detections, state.currentGestureCandidate);
 }
 
 function buildMockPayload(mode) {
@@ -1156,12 +1260,18 @@ async function requestDetections() {
     const detections = buildDetectionsFromResult(result);
     applyDetectionPayload({ detections });
 
-    if ((state.scene === "play" && state.gestureArmed) || IS_EDIT_VIEW) {
+    const shouldTrackHands = state.hasPresence || state.scene === "play" || IS_EDIT_VIEW;
+
+    if (shouldTrackHands) {
       const gestureResult = state.gestureRecognizer?.recognizeForVideo(cameraVideo, now);
       const gestureCandidate = extractGestureCandidate(gestureResult);
       updateGestureCandidate(gestureCandidate);
+      drawBoxes(detections, state.currentGestureCandidate);
     } else {
-      setGestureArmed(false);
+      state.currentGestureCandidate = null;
+      state.pendingGestureHand = null;
+      state.pendingGestureFrames = 0;
+      drawBoxes(detections, null);
     }
   } catch (error) {
     state.detectorOnline = false;
